@@ -1,9 +1,20 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.android)
+}
+
+// Release signing key, kept outside the repo. Without it, release builds are unsigned
+// (as F-Droid expects, since it signs builds itself).
+val signingPropertiesFile = file(
+  System.getenv("REMOTEAI_SIGNING_PROPERTIES")
+    ?: "${System.getProperty("user.home")}/.config/remoteai-release/signing.properties"
+)
+val signingProperties = Properties().apply {
+  if (signingPropertiesFile.exists()) signingPropertiesFile.inputStream().use { load(it) }
 }
 
 android {
@@ -15,7 +26,7 @@ android {
     minSdk = 26
     targetSdk = 36
     versionCode = 1
-    versionName = "1.0"
+    versionName = "1.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     ndk {
@@ -33,8 +44,20 @@ android {
   }
 
 
+  signingConfigs {
+    if (signingPropertiesFile.exists()) {
+      create("release") {
+        storeFile = file(signingProperties.getProperty("storeFile"))
+        storePassword = signingProperties.getProperty("storePassword")
+        keyAlias = signingProperties.getProperty("keyAlias")
+        keyPassword = signingProperties.getProperty("keyPassword")
+      }
+    }
+  }
+
   buildTypes {
     release {
+      signingConfig = signingConfigs.findByName("release")
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }

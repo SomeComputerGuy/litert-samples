@@ -21,14 +21,26 @@ Only the Pixel 10 and Pixel 11 have been tested. No TPU build exists for other c
 
 ## Install
 
-Build and install with the [Android SDK](https://developer.android.com/studio) (JDK 21 required):
+Download the APK from the [latest release](https://github.com/SomeComputerGuy/litert-samples/releases/latest) and install it (allow installing from your browser or file manager when Android asks). Releases are signed with this certificate; check it if you got the APK from somewhere else:
+
+```
+SHA-256: e9:3d:ab:54:11:f7:b0:e6:61:91:f3:28:09:b9:06:1a:03:9f:55:d1:2f:82:c3:3d:b9:91:49:c2:71:05:d0:ec
+```
+
+`apksigner verify --print-certs RemoteAI-Responder-*.apk` shows it.
+
+### Build it yourself
+
+With the [Android SDK](https://developer.android.com/studio) (JDK 21 required):
 
 ```shell
 ./gradlew :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-`sample_app_tpu.apk` in this folder is Google's original chat sample, not RemoteAI Responder.
+A debug build can't update a release install (or the other way round) because they're signed differently; uninstall first, which deletes the app's models and pairings.
+
+`./gradlew :app:assembleRelease` signs with the key described in `~/.config/remoteai-release/signing.properties` (or the file named by `REMOTEAI_SIGNING_PROPERTIES`), with `storeFile`, `storePassword`, `keyAlias` and `keyPassword`. Without that file the release APK is unsigned.
 
 ## Use
 

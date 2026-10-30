@@ -199,10 +199,13 @@ class AnthropicServerService : Service() {
             _status.value = Status.Starting(modelId)
         }
 
+        // "Enabled" (restart me after the process dies) is only set once the model has loaded.
+        // A native crash while loading would otherwise restart the service into the same crash.
+        // commit(), not apply(): the write must land before native code that might abort.
         prefs.edit()
-            .putBoolean(KEY_ENABLED, true)
+            .putBoolean(KEY_ENABLED, false)
             .putString(KEY_MODEL_ID, modelId)
-            .apply()
+            .commit()
         acquireWifiLock()
 
         serviceScope.launch {
@@ -230,6 +233,7 @@ class AnthropicServerService : Service() {
                 )
 
                 result.getOrThrow()
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, true).apply()
                 startHttpServer(model)
             } catch (e: CancellationException) {
                 throw e
