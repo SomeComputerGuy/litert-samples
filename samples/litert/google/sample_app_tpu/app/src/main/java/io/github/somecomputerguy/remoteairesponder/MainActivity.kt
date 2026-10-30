@@ -80,6 +80,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedModel: ModelConfig? = null
     private var downloadJob: Job? = null
     private var lastShownPairingId: String? = null
+    private var downloadPrompt: AlertDialog? = null
 
     // Action waiting on the notification permission prompt.
     private var afterNotificationPermission: (() -> Unit)? = null
@@ -341,7 +342,9 @@ class MainActivity : AppCompatActivity() {
     // ---------------------------------------------------------------- Downloads
 
     private fun promptModelDownload(model: ModelConfig) {
-        AlertDialog.Builder(this)
+        // The model menu can report one tap twice; a second, stacked prompt would restart the download.
+        if (downloadPrompt?.isShowing == true) return
+        downloadPrompt = AlertDialog.Builder(this)
             .setTitle("Download a model for this phone?")
             .setMessage(
                 when {
@@ -569,12 +572,16 @@ class MainActivity : AppCompatActivity() {
             1 -> clients[0].name
             else -> "${clients.size} coordinators"
         }
-        findViewById<TextView>(R.id.textPaired).text =
-            if (androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()) {
-                summary
-            } else {
+        val notifications = getSystemService(NotificationManager::class.java)
+        findViewById<TextView>(R.id.textPaired).text = when {
+            !androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled() ->
                 "$summary\nNotifications are off: pairing requests only appear while this app is open"
-            }
+            // Do Not Disturb blocks the full-screen alert unless the app is allowed to interrupt.
+            notifications.currentInterruptionFilter > NotificationManager.INTERRUPTION_FILTER_ALL ->
+                "$summary\nDo Not Disturb is on: pairing requests won't wake the phone unless " +
+                    "RemoteAI Responder is allowed to interrupt"
+            else -> summary
+        }
     }
 
     private fun showPairedClients() {
