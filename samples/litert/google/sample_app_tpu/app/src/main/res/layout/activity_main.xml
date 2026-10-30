@@ -1,34 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#121214">
+    android:background="#121214"
+    android:orientation="vertical">
 
-    <!-- Premium Custom Header bar for Model Selection & Diagnostics -->
+    <!-- Model selection and model status -->
     <LinearLayout
         android:id="@+id/headerBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:paddingHorizontal="16dp"
-        android:paddingVertical="14dp"
-        android:background="#121214"
-        android:elevation="0dp"
-        android:gravity="center_vertical"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        android:paddingTop="14dp"
+        android:paddingBottom="10dp">
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"
+            android:text="MODEL"
+            android:textColor="#9CA3AF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.08" />
 
-        <!-- Custom Dropdown container for spinner -->
         <FrameLayout
-            android:layout_width="0dp"
-            android:layout_height="42dp"
-            android:layout_weight="1.3"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
             android:background="@drawable/bg_spinner_container"
             android:paddingHorizontal="4dp">
-            
+
             <Spinner
                 android:id="@+id/spinnerModel"
                 android:layout_width="match_parent"
@@ -38,236 +41,217 @@
                 android:background="@null" />
         </FrameLayout>
 
-        
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/textBackendStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="26dp"
+                android:layout_marginEnd="10dp"
+                android:background="@drawable/bg_backend_badge"
+                android:gravity="center"
+                android:paddingHorizontal="10dp"
+                android:text="--"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/textModelStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Select a model to begin"
+                android:textColor="#D1D5DB"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:id="@+id/progressDownload"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:max="1000"
+            android:visibility="gone"
+            app:indicatorColor="#3B82F6"
+            app:trackColor="#2E2E38"
+            app:trackCornerRadius="2dp" />
+    </LinearLayout>
+
+    <!-- Traffic log -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="6dp">
 
         <TextView
-            android:id="@+id/textBackendStatus"
-            android:layout_width="wrap_content"
-            android:layout_height="32dp"
-            android:layout_marginStart="12dp"
-            android:background="@drawable/bg_backend_badge"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:paddingHorizontal="12dp"
-            android:gravity="center"
-            android:text="CPU" />
-
-        <TextView
-            android:id="@+id/textBenchmarkStats"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="12dp"
+            android:text="TRAFFIC"
             android:textColor="#9CA3AF"
             android:textSize="11sp"
             android:textStyle="bold"
-            android:fontFamily="sans-serif-medium"
-            android:text="TTFT: --\n-- t/s | total: -- s\ncontext: ~--"
-            android:gravity="center" />
+            android:letterSpacing="0.08" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonClearLog"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:minWidth="0dp"
+            android:paddingHorizontal="8dp"
+            android:text="Clear"
+            android:textColor="#9CA3AF"
+            android:textSize="12sp" />
     </LinearLayout>
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/chatRecyclerView"
-        android:layout_width="0dp"
+    <FrameLayout
+        android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:clipToPadding="false"
-        android:paddingTop="12dp"
-        android:paddingBottom="12dp"
-        app:layout_constraintTop_toBottomOf="@id/headerBar"
-        app:layout_constraintBottom_toTopOf="@+id/inputCard"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        android:layout_weight="1">
 
-    <!-- Premium glassmorphic input area -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/inputCard"
-        android:layout_width="0dp"
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/logRecyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingHorizontal="12dp"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:id="@+id/textEmptyLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:paddingHorizontal="32dp"
+            android:text="Requests and responses will appear here once the API is running."
+            android:textColor="#6B7280"
+            android:textSize="13sp" />
+    </FrameLayout>
+
+    <!-- Connection details and the API switch -->
+    <LinearLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginBottom="16dp"
-        app:cardCornerRadius="28dp"
-        app:cardElevation="0dp"
-        app:cardBackgroundColor="#1A1A1E"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:strokeWidth="1dp"
-        app:strokeColor="#2E2E38">
+        android:background="#1A1A1E"
+        android:orientation="vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="16dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="6dp">
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
             <LinearLayout
-                android:id="@+id/recordingIndicatorLayout"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="12dp"
-                android:layout_marginTop="8dp"
-                android:background="#2E2E38"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="8dp"
-                android:visibility="gone">
+                android:layout_weight="1"
+                android:orientation="vertical">
 
                 <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:layout_weight="1"
-                    android:text="🔴 Recording Audio..."
-                    android:textColor="#FFFFFF"
-                    android:textSize="14sp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/stopRecordingButton"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Stop"
-                    android:textColor="#EF4444" />
-            </LinearLayout>
+                    android:text="BASE URL"
+                    android:textColor="#9CA3AF"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.08" />
 
-            <ImageView
-                android:id="@+id/selectedImageView"
-                android:layout_width="100dp"
-                android:layout_height="100dp"
-                android:layout_marginStart="16dp"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="8dp"
-                android:scaleType="centerCrop"
-                android:visibility="gone" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:id="@+id/attachButton"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:layout_marginStart="6dp"
-                    android:background="@drawable/bg_circle_attach"
-                    android:src="@drawable/ic_attach_pro"
-                    android:padding="10dp"
-                    android:scaleType="centerInside"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:foreground="?attr/selectableItemBackgroundBorderless" />
-
-                <EditText
-                    android:id="@+id/messageEditText"
-                    android:layout_width="0dp"
+                <TextView
+                    android:id="@+id/textBaseUrl"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="12dp"
-                    android:layout_weight="1"
-                    android:background="@null"
-                    android:hint="Type a message..."
-                    android:fontFamily="sans-serif"
+                    android:fontFamily="monospace"
+                    android:text="http://PHONE_IP:8080"
                     android:textColor="#F3F4F6"
-                    android:textColorHint="#9CA3AF"
-                    android:inputType="textCapSentences|textMultiLine"
-                    android:maxLines="4"
-                    android:minHeight="44dp"
-                    android:paddingVertical="10dp"
-                    android:textSize="16sp" />
-
-                <ImageView
-                    android:id="@+id/sendButton"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
-                    android:layout_marginEnd="6dp"
-                    android:background="@drawable/bg_circle_send"
-                    android:src="@drawable/ic_send_pro"
-                    android:padding="10dp"
-                    android:scaleType="centerInside"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:foreground="?attr/selectableItemBackgroundBorderless" />
+                    android:textSize="14sp" />
             </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonCopyUrl"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:minWidth="0dp"
+                android:paddingHorizontal="14dp"
+                android:text="Copy"
+                android:textColor="#F3F4F6"
+                android:textSize="12sp"
+                app:strokeColor="#3F3F4A" />
         </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
 
-    <!-- Camera Preview Overlay -->
-    <FrameLayout
-        android:id="@+id/cameraContainer"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="#000000"
-        android:visibility="gone"
-        android:clickable="true"
-        android:focusable="true">
-
-        <androidx.camera.view.PreviewView
-            android:id="@+id/viewFinder"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-        <RelativeLayout
-            android:layout_width="match_parent"
-            android:layout_height="match_parent">
-
-            <!-- Top Close/Cancel Button -->
-            <ImageView
-                android:id="@+id/btnCancelCamera"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_alignParentTop="true"
-                android:layout_alignParentStart="true"
-                android:layout_margin="24dp"
-                android:background="@drawable/bg_circle_attach"
-                android:src="@android:drawable/ic_menu_close_clear_cancel"
-                android:padding="12dp"
-                android:clickable="true"
-                android:focusable="true" />
-
-            <!-- Bottom Control Layout -->
             <LinearLayout
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_alignParentBottom="true"
-                android:gravity="center"
-                android:orientation="horizontal"
-                android:paddingBottom="48dp"
-                android:paddingTop="24dp"
-                android:background="#B3000000">
+                android:layout_weight="1"
+                android:orientation="vertical">
 
-                <!-- Spacer to balance layout -->
-                <View
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:layout_marginHorizontal="24dp" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="API KEY"
+                    android:textColor="#9CA3AF"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.08" />
 
-                <!-- Shutter Capture Button -->
-                <ImageView
-                    android:id="@+id/btnCaptureCamera"
-                    android:layout_width="72dp"
-                    android:layout_height="72dp"
-                    android:layout_marginHorizontal="24dp"
-                    android:background="@drawable/bg_shutter_button"
-                    android:clickable="true"
-                    android:focusable="true" />
-
-                <!-- Switch Camera Button -->
-                <ImageView
-                    android:id="@+id/btnSwitchCamera"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:layout_marginHorizontal="24dp"
-                    android:background="@drawable/bg_circle_attach"
-                    android:src="@android:drawable/ic_menu_rotate"
-                    android:padding="12dp"
-                    android:clickable="true"
-                    android:focusable="true" />
-
+                <TextView
+                    android:id="@+id/textApiKey"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="••••"
+                    android:textColor="#F3F4F6"
+                    android:textSize="14sp" />
             </LinearLayout>
-        </RelativeLayout>
-    </FrameLayout>
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonCopyKey"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:minWidth="0dp"
+                android:paddingHorizontal="14dp"
+                android:text="Copy"
+                android:textColor="#F3F4F6"
+                android:textSize="12sp"
+                app:strokeColor="#3F3F4A" />
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/buttonApiServer"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_marginTop="14dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="Start API"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            app:backgroundTint="#10B981"
+            app:cornerRadius="16dp" />
+    </LinearLayout>
+</LinearLayout>

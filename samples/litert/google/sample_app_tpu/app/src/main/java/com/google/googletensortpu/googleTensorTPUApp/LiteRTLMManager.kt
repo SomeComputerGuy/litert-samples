@@ -11,8 +11,11 @@ import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runBlocking
 import java.io.File
 
 /**
@@ -21,11 +24,18 @@ import java.io.File
  */
 class LiteRTLMManager private constructor(private val context: Context) {
     
+    private val inferenceMutex = Mutex()
+
     private var engine: Engine? = null
     private var conversation: com.google.ai.edge.litertlm.Conversation? = null
     private var isInitialized = false
     private var currentBackendName: String = "CPU"
     private var nativeRuntimeConfigured = false
+
+    // Snapshot used to recreate the Activity conversation after API requests.
+    private var activeModelPath: String? = null
+    private var uiSystemPrompt: String? = null
+    private val uiHistory = mutableListOf<Message>()
     
     companion object {
         private const val TAG = "LiteRTLMManager"
@@ -52,22 +62,36 @@ class LiteRTLMManager private constructor(private val context: Context) {
         supportsAudio: Boolean = false,
         maxContext: Int = 2048,
         initialMessages: List<Message>? = null
-    ): Result<Boolean> = withContext(Dispatchers.IO) {
-        Log.i(TAG, "Initializing model: $modelPath (preferred: $preferredBackend)")
-        if (isInitialized) {
-            cleanup()
-        }
-        
+    ): Result<Boolean> = inferenceMutex.withLock {
+        withContext(Dispatchers.IO) {
+            Log.i(TAG, "Initializing model: $modelPath (preferred: $preferredBackend)")
 
-        try {
-            val backends = buildBackendList(preferredBackend)
-            initializeEngineWithFallback(modelPath, backends, systemPrompt, supportsImage, supportsAudio, maxContext, initialMessages)
-            isInitialized = true
-            Log.i(TAG, "Initialization SUCCEEDED on backend: $currentBackendName")
-            Result.success(true)
-        } catch (e: Throwable) {
-            Log.e(TAG, "Initialization FAILED: ${e.message}", e)
-            Result.failure(Exception(e))
+            if (isInitialized && activeModelPath == modelPath && conversation != null) {
+                Log.i(TAG, "Requested model is already initialized; reusing active engine")
+                return@withContext Result.success(true)
+            }
+
+            if (isInitialized) {
+                cleanupUnlocked()
+            }
+
+            try {
+                val backends = buildBackendList(preferredBackend)
+                initializeEngineWithFallback(
+                    modelPath, backends, systemPrompt, supportsImage,
+                    supportsAudio, maxContext, initialMessages
+                )
+                uiHistory.clear()
+                uiHistory.addAll(initialMessages ?: emptyList())
+                uiSystemPrompt = systemPrompt
+                activeModelPath = modelPath
+                isInitialized = true
+                Log.i(TAG, "Initialization SUCCEEDED on backend: $currentBackendName")
+                Result.success(true)
+            } catch (e: Throwable) {
+                Log.e(TAG, "Initialization FAILED: ${e.message}", e)
+                Result.failure(Exception(e))
+            }
         }
     }
 
@@ -263,40 +287,122 @@ class LiteRTLMManager private constructor(private val context: Context) {
     }
     /**
      * Send a text-only message and stream the response.
+     * The lock remains held until collection of the response completes.
      */
-    fun sendMessage(text: String): Flow<String> {
-        val conv = conversation ?: throw IllegalStateException("Engine/Conversation not initialized.")
-        return conv.sendMessageAsync(text).map { msg ->
-            msg.extractText()
+    fun sendMessage(text: String): Flow<String> = flow {
+        inferenceMutex.withLock {
+            val conv = conversation
+                ?: throw IllegalStateException("Engine/Conversation not initialized.")
+
+            val response = StringBuilder()
+            conv.sendMessageAsync(text).collect { msg ->
+                val chunk = msg.extractText()
+                response.append(chunk)
+                emit(chunk)
+            }
+
+            uiHistory.add(Message.user(text))
+            if (response.isNotEmpty()) {
+                uiHistory.add(Message.model(response.toString()))
+            }
         }
     }
 
     /**
      * Send a multimodal message with optional image and/or audio files.
      */
+    /**
+     * Runs an isolated API request conversation on the currently loaded engine.
+     * The Activity's conversation and chat history are not modified.
+     * initialMessages contains the request history before the final user prompt.
+     */
+    fun sendRequestMessage(
+        initialMessages: List<Message>,
+        finalUserPrompt: String,
+        systemPrompt: String? = null
+    ): Flow<String> = flow {
+        inferenceMutex.withLock {
+            val activeEngine = engine
+                ?: throw IllegalStateException("Engine is not initialized.")
+
+            if (!isInitialized) {
+                throw IllegalStateException("Engine is not initialized.")
+            }
+
+            // LiteRT-LM supports one session per engine. Close the UI session
+            // before creating the independent API request session.
+            conversation?.close()
+            conversation = null
+
+            try {
+                val requestConversation = activeEngine.createConversation(
+                    ConversationConfig(
+                        systemInstruction = if (systemPrompt != null) {
+                            Contents.of(systemPrompt)
+                        } else {
+                            null
+                        },
+                        initialMessages = initialMessages
+                    )
+                )
+
+                try {
+                    requestConversation.sendMessageAsync(finalUserPrompt).collect { msg ->
+                        emit(msg.extractText())
+                    }
+                } finally {
+                    requestConversation.close()
+                }
+            } finally {
+                // Restore the Activity session regardless of API success/failure.
+                conversation = activeEngine.createConversation(
+                    ConversationConfig(
+                        systemInstruction = if (uiSystemPrompt != null) {
+                            Contents.of(uiSystemPrompt!!)
+                        } else {
+                            null
+                        },
+                        initialMessages = uiHistory.toList()
+                    )
+                )
+                Log.i(TAG, "Restored Activity conversation after API request")
+            }
+        }
+    }
+
     fun sendMultimodalMessage(
         text: String,
         imagePath: String? = null,
         audioPath: String? = null
-    ): Flow<String> {
-        val conv = conversation ?: throw IllegalStateException("Engine/Conversation not initialized.")
-        
-        val contentParts = mutableListOf<Content>()
-        
-        if (imagePath != null) {
-            contentParts.add(Content.ImageFile(imagePath))
-        }
-        
-        if (audioPath != null) {
-            contentParts.add(Content.AudioFile(audioPath))
-        }
-        
-        contentParts.add(Content.Text(text))
-        
-        val contents = Contents.of(*contentParts.toTypedArray())
-        
-        return conv.sendMessageAsync(contents).map { msg ->
-            msg.extractText()
+    ): Flow<String> = flow {
+        inferenceMutex.withLock {
+            val conv = conversation
+                ?: throw IllegalStateException("Engine/Conversation not initialized.")
+
+            val contentParts = mutableListOf<Content>()
+
+            if (imagePath != null) {
+                contentParts.add(Content.ImageFile(imagePath))
+            }
+
+            if (audioPath != null) {
+                contentParts.add(Content.AudioFile(audioPath))
+            }
+
+            contentParts.add(Content.Text(text))
+            val contents = Contents.of(*contentParts.toTypedArray())
+
+            val response = StringBuilder()
+            conv.sendMessageAsync(contents).collect { msg ->
+                val chunk = msg.extractText()
+                response.append(chunk)
+                emit(chunk)
+            }
+
+            uiHistory.add(Message.user(contents))
+            if (response.isNotEmpty()) {
+                uiHistory.add(Message.model(response.toString()))
+            }
         }
     }
 
@@ -312,6 +418,17 @@ class LiteRTLMManager private constructor(private val context: Context) {
     fun getActiveBackendName(): String = currentBackendName
 
     fun cleanup() {
+        runBlocking {
+            inferenceMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    cleanupUnlocked()
+                }
+            }
+        }
+    }
+
+    // Caller must already hold inferenceMutex.
+    private fun cleanupUnlocked() {
         try {
             conversation?.close()
             engine?.close()
@@ -321,6 +438,9 @@ class LiteRTLMManager private constructor(private val context: Context) {
             conversation = null
             engine = null
             isInitialized = false
+            activeModelPath = null
+            uiSystemPrompt = null
+            uiHistory.clear()
         }
     }
 }

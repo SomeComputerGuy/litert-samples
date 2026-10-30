@@ -13,5 +13,8 @@ data class ModelConfig(
     val supportsImage: Boolean = true,
     val supportsAudio: Boolean = false,
     val defaultPrompt: String = "Describe what you see.",
-    val maxContext: Int = 2048
+    val maxContext: Int = 2048,
+    // Set for models the app fetches itself instead of bundling or sideloading.
+    val downloadUrl: String? = null,
+    val sizeBytes: Long = 0L
 )
