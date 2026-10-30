@@ -1,4 +1,4 @@
-package com.google.googletensortpu.googleTensorTPUApp
+package io.github.somecomputerguy.remoteairesponder
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

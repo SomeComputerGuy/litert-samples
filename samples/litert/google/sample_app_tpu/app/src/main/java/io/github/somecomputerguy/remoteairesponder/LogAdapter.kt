@@ -1,12 +1,12 @@
-package com.google.googletensortpu.googleTensorTPUApp
+package io.github.somecomputerguy.remoteairesponder
 
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import com.google.googletensortpu.googleTensorTPUApp.AnthropicServerService.LogEntry
-import com.google.googletensortpu.googleTensorTPUApp.AnthropicServerService.LogKind
+import io.github.somecomputerguy.remoteairesponder.AnthropicServerService.LogEntry
+import io.github.somecomputerguy.remoteairesponder.AnthropicServerService.LogKind
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

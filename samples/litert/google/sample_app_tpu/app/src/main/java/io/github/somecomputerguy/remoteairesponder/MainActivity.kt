@@ -1,4 +1,4 @@
-package com.google.googletensortpu.googleTensorTPUApp
+package io.github.somecomputerguy.remoteairesponder
 
 import android.Manifest
 import android.app.AlertDialog
@@ -79,8 +79,8 @@ class MainActivity : AppCompatActivity() {
     private var selectedModel: ModelConfig? = null
     private var downloadJob: Job? = null
 
-    // Server start waiting on the notification permission prompt.
-    private var pendingServerModel: ModelConfig? = null
+    // Action waiting on the notification permission prompt.
+    private var afterNotificationPermission: (() -> Unit)? = null
 
     private val serverPrefs by lazy {
         getSharedPreferences(AnthropicServerService.PREFS, MODE_PRIVATE)
@@ -96,12 +96,22 @@ class MainActivity : AppCompatActivity() {
 
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
-            // The server runs either way; without the permission its notification is hidden.
-            pendingServerModel?.let {
-                pendingServerModel = null
-                startServer(it)
-            }
+            // Proceed either way; without the permission the notifications are just hidden.
+            afterNotificationPermission?.invoke()
+            afterNotificationPermission = null
         }
+
+    /** Asks for notification permission (Android 13+) if needed, then runs [action]. */
+    private fun withNotificationPermission(action: () -> Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            afterNotificationPermission = action
+            requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            action()
+        }
+    }
 
     private fun isServerActive(): Boolean = AnthropicServerService.isActive
 
@@ -332,9 +342,12 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "Stop the API before switching models", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-                ModelResolver.acceptDownload(this, model)
-                refreshSpinner()
-                selectModel(model)
+                // Download progress is shown in a notification while the app is in the background.
+                withNotificationPermission {
+                    ModelResolver.acceptDownload(this, model)
+                    refreshSpinner()
+                    selectModel(model)
+                }
             }
             .setNegativeButton("Not now", null)
             .show()
@@ -344,22 +357,16 @@ class MainActivity : AppCompatActivity() {
         progressDownload.visibility = View.VISIBLE
         progressDownload.isIndeterminate = true
 
+        // The service keeps the download going with the screen off or the app in the background.
+        ModelDownloadService.start(this, model)
         downloadJob?.cancel()
         downloadJob = lifecycleScope.launch {
             val result = ModelDownloader.download(this@MainActivity, model)
                 .onEach { state ->
                     if (state is ModelDownloader.State.Running) {
                         progressDownload.isIndeterminate = false
-                        progressDownload.progress = (state.downloadedBytes * 1000 / state.totalBytes).toInt()
-                        textModelStatus.text = buildString {
-                            append("Downloading · %.2f of %.2f GB".format(
-                                state.downloadedBytes / 1e9, state.totalBytes / 1e9
-                            ))
-                            if (state.bytesPerSecond > 0) {
-                                append(" · %.1f MB/s".format(state.bytesPerSecond / 1e6))
-                            }
-                            state.secondsLeft?.let { append(" · ${formatDuration(it)} left") }
-                        }
+                        progressDownload.progress = state.permille
+                        textModelStatus.text = "Downloading · ${state.describe()}"
                     }
                 }
                 .first { it is ModelDownloader.State.Done || it is ModelDownloader.State.Failed }
@@ -378,12 +385,6 @@ class MainActivity : AppCompatActivity() {
                 showModelState()
             }
         }
-    }
-
-    private fun formatDuration(seconds: Long): String = when {
-        seconds >= 3600 -> "${seconds / 3600}h ${seconds % 3600 / 60}m"
-        seconds >= 60 -> "${seconds / 60}m ${seconds % 60}s"
-        else -> "${seconds}s"
     }
 
     // ---------------------------------------------------------------- Custom model upload
@@ -575,14 +576,7 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-            ) {
-                pendingServerModel = model
-                requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-            } else {
-                startServer(model)
-            }
+            withNotificationPermission { startServer(model) }
         }
     }
 

@@ -1,4 +1,4 @@
-package com.google.googletensortpu.googleTensorTPUApp
+package io.github.somecomputerguy.remoteairesponder
 
 import android.graphics.Bitmap
 import org.junit.Assert.assertEquals

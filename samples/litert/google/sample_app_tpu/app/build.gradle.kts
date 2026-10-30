@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-  namespace = "com.google.googletensortpu.googleTensorTPUApp"
+  namespace = "io.github.somecomputerguy.remoteairesponder"
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "com.google.googletensortpu.googleTensorTPUApp"
+    applicationId = "io.github.somecomputerguy.remoteairesponder"
     minSdk = 26
     targetSdk = 36
     versionCode = 1

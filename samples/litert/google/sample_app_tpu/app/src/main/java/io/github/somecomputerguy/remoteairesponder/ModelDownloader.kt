@@ -1,4 +1,4 @@
-package com.google.googletensortpu.googleTensorTPUApp
+package io.github.somecomputerguy.remoteairesponder
 
 import android.content.Context
 import android.util.Log
@@ -34,6 +34,22 @@ object ModelDownloader {
         ) : State {
             val secondsLeft: Long?
                 get() = if (bytesPerSecond > 0) (totalBytes - downloadedBytes) / bytesPerSecond else null
+
+            val permille: Int
+                get() = (downloadedBytes * 1000 / totalBytes).toInt()
+
+            /** e.g. "1.24 of 3.11 GB · 38.5 MB/s · 48s left" */
+            fun describe(): String = buildString {
+                append("%.2f of %.2f GB".format(downloadedBytes / 1e9, totalBytes / 1e9))
+                if (bytesPerSecond > 0) append(" · %.1f MB/s".format(bytesPerSecond / 1e6))
+                secondsLeft?.let { append(" · ${formatDuration(it)} left") }
+            }
+
+            private fun formatDuration(seconds: Long): String = when {
+                seconds >= 3600 -> "${seconds / 3600}h ${seconds % 3600 / 60}m"
+                seconds >= 60 -> "${seconds / 60}m ${seconds % 60}s"
+                else -> "${seconds}s"
+            }
         }
         object Done : State
         data class Failed(val message: String) : State

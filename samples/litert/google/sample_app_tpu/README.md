@@ -88,18 +88,19 @@ Multi-turn conversations work: send earlier `user` and `assistant` turns in `mes
 ## How it works
 
 ```
-app/src/main/java/com/google/googletensortpu/googleTensorTPUApp/
+app/src/main/java/io/github/somecomputerguy/remoteairesponder/
 ├── AnthropicServerService.kt  Foreground service: HTTP server, auth, request handling, status and traffic log
 ├── LiteRTLMManager.kt         LiteRT-LM engine: NPU → GPU → CPU fallback, one request at a time
 ├── ModelResolver.kt           Model list, choice of model for this phone, file locations
 ├── ModelDownloader.kt         Resumable model downloads with progress and speed
+├── ModelDownloadService.kt    Keeps a download running with the screen off, with a progress notification
 ├── MainActivity.kt            Control panel: model picker, traffic log, connection details, start/stop
 └── LogAdapter.kt              Traffic log list
 ```
 
 - **The service owns the model.** Only `AnthropicServerService` loads the model; the screen just shows status. Stopping the API closes connections, lets in-flight work finish, then releases the model.
 - **Staying up in the background.** The service runs as a foreground service with a persistent notification. It holds a Wi-Fi lock while serving and a wake lock for each request, and `START_STICKY` brings it back if Android kills the process.
-- **Models.** Downloaded models live in the app's private storage (`files/models/`). Deleting a model from the menu removes every copy the app holds.
+- **Models.** Downloads run in a foreground service, so they continue with the screen off or the app in the background. Downloaded models live in the app's private storage (`files/models/`). Deleting a model from the menu removes every copy the app holds.
 
 ### TPU notes
 
