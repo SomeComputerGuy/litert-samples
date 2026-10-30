@@ -1,3 +1,6 @@
+> [!NOTE]
+> **This is a fork of [google-ai-edge/litert-samples](https://github.com/google-ai-edge/litert-samples).** It adds **[RemoteAI Responder](samples/litert/google/sample_app_tpu/)**, an Android app that turns a Pixel into a private LLM server: Gemma 4 runs on the Tensor TPU and answers requests from other machines through an Anthropic-compatible API. Everything else is Google's original repository.
+
 <div align="center">
   <img src="https://raw.githubusercontent.com/google-ai-edge/LiteRT/main/docs/sources/litert_logo.png" alt="LiteRT Logo" width="320"/>
 
@@ -185,7 +188,7 @@ All runnable applications live under **[`samples/`](samples/)**. New application
 
 | Sample Directory | Target Silicon | What It Demonstrates |
 | :--- | :--- | :--- |
-| **[`samples/litert/google/sample_app_tpu/`](samples/litert/google/sample_app_tpu/)** | **Google Tensor TPU** (Pixel) | Multimodal chat with [Gemma 4 E2B (`gemma-4-E2B-it_Google_Tensor_G5.litertlm`)](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) on Pixel Tensor TPU. |
+| **[`samples/litert/google/sample_app_tpu/`](samples/litert/google/sample_app_tpu/)** | **Google Tensor TPU** (Pixel) | **RemoteAI Responder** (this fork): serves [Gemma 4 E2B](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) from a Pixel's Tensor TPU to other machines over an Anthropic-compatible API. Originally Google's multimodal chat sample. |
 | **[`samples/litert/qualcomm/llm_chatbot_npu/`](samples/litert/qualcomm/llm_chatbot_npu/)** | **Qualcomm Snapdragon NPU** | Multimodal chat (text, image, audio) with [Gemma 4 E2B](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) and [FastVLM-0.5B](https://huggingface.co/litert-community/FastVLM-0.5B) on Snapdragon 8 Elite NPU. |
 | **[`samples/litert/qualcomm/gemma3/`](samples/litert/qualcomm/gemma3/)** & **[`gemma4/`](samples/litert/qualcomm/gemma4/)** & **[`fast_vlm/`](samples/litert/qualcomm/fast_vlm/)** | **Qualcomm NPU / GPU / CPU** | Dedicated [Gemma 3 1B](https://huggingface.co/litert-community/Gemma3-1B-IT), [Gemma 4 E2B](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm), and FastVLM 0.5B Android apps with NPU compilation guides. |
 | **[`samples/litert/qualcomm/mobilenet_v2/`](samples/litert/qualcomm/mobilenet_v2/)** & **[`object_detection/`](samples/litert/qualcomm/object_detection/efficientdet/kotlin_npu/)** | **Qualcomm NPU (JIT & AOT)** | Zero-config on-device JIT NPU compilation (MobileNet-v2) and live camera NPU object detection (EfficientDet-Lite0). |

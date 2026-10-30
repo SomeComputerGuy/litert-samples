@@ -1,128 +1,120 @@
-# LiteRT-LM Multimodal Chatbot: Google Tensor TPU Reference Implementation
+# RemoteAI Responder
 
-This repository provides a reference architecture and framework for building high-performance, **on-device multimodal LLM applications** on Android. Powered by **Google LiteRT-LM**, this project demonstrates how to orchestrate local inference while leveraging hardware acceleration on **Google Tensor TPUs (G5)**, with automated fallbacks to GPU and CPU.
+RemoteAI Responder turns an Android phone into a small, private LLM server. It runs Gemma 4 on the phone, on the Google Tensor TPU where it can, and answers requests from other machines on your network through an **Anthropic-compatible Messages API**.
 
-Developers can use this codebase as a plug-and-play sandbox to evaluate local LLMs (like Gemma) or as a foundation/starter-kit for their own on-device AI applications.
+Pick a model, tap **Start API**, copy the base URL and API key, and send requests from your computer. The app keeps serving in the background, with the screen off, until you stop it.
 
+It started as Google's [LiteRT-LM Tensor TPU sample app](#credits-and-license); the on-device chat UI has been replaced with a control panel for running the phone as a server.
 
-## Install on Pixel-10 using APK
-To get started,
-1. Please download the Sample TPU app [here](./sample_app_tpu.apk) and install it on your Pixel-10 device using the command: `adb install -r /path/to/sample_app_tpu.apk`.
-2. Download the [TPU-optimized Gemma4 LiteRT-LM model](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it_Google_Tensor_G5.litertlm) and push it to your Pixel-10 device with: `adb push /path/to/gemma-4-E2B-it_Google_Tensor_G5.litertlm /sdcard/download/gemma4.litert`.
+## Supported phones and models
 
-## 🛠️ Developer Architecture & Core Components
+The app picks a model for the phone it is running on, and downloads it from the [`litert-community`](https://huggingface.co/litert-community) models on Hugging Face the first time you start it.
 
-The framework is decoupled to separate the UI layer from the underlying inference engine, allowing you to easily rip out the UI and reuse the orchestration core.
+| Phone | Model offered | Size | Runs on |
+|---|---|---|---|
+| Pixel 10 (Tensor G5) | Gemma 4 E2B, compiled for Tensor G5 | 3.1 GB | TPU (NPU) |
+| Pixel 11 (Tensor G6) | Gemma 4 E2B, compiled for Tensor G6 | 3.3 GB | TPU (NPU) |
+| Any other 64-bit Android phone | Gemma 4 E2B GPU build | 2.0 GB | GPU |
+| Any other phone with 12 GB+ RAM | Gemma 4 E4B GPU build (also offered) | 3.0 GB | GPU |
 
-```
-├── app/src/main/java/.../
-│   ├── LiteRTLMManager.kt    <-- Core Inference Orchestrator (Singleton)
-│   ├── ModelResolver.kt      <-- Model Lifecycle & Asset Copier
-│   ├── ModelConfig.kt        <-- Hardware Backend & Tokenizer Specs
-│   └── UI Components         <-- Activity, Adapters, and View Bindings
+Only the Pixel 10 and Pixel 11 have been tested. No TPU build exists for other chips (including Tensor G4), so those phones use the GPU builds, which haven't been tested on a phone yet. You can also load your own `.litertlm` model with **Upload New Model...** in the model menu.
 
-```
+## Install
 
-### 1\. Engine & Lifecycle Management (`LiteRTLMManager.kt`)
-
-This is the core engine singleton. It encapsulates the LiteRT-LM `Engine` and `Conversation` lifecycles, abstracting thread management and inference execution away from the UI.
-
-* **Fallback Chain Orchestration:** Programmatically handles hardware initialization. It attempts to bind to the **Tensor TPU (NPU)** first, intercepting failures to transparently cascade down to **GPU (OpenCL)**, and ultimately **CPU**.  
-* **Streaming & Performance Metrics:** Exposes hooks for real-time token streaming, capturing metrics such as Time to First Token (TTFT), Total Time for Response,  evaluation throughput (tokens/sec) and context length.
-
-### 2\. Model & Backend Mapping (`ModelResolver.kt` & `ModelConfig.kt`)
-
-* **Static Assets & Dynamic Registry:** Manages both bundled models (read from raw resources) and dynamically registered custom models (`.litertlm`). It handles the filesystem copying required to make raw asset descriptors readable by the native execution layer.
-
----
-
-## 🚀 Quickstart: Testing LLMs
-
-### 1\. Environment & Build Requirements
-
-* **JDK:** Requires minimum **JDK 21** (Ensure `JAVA_HOME` is set correctly).  
-* **ABI Target:** `arm64-v8a` (required for native Tensor TPU libraries).
+Build and install with the [Android SDK](https://developer.android.com/studio) (JDK 21 required):
 
 ```shell
-# Clone and compile the debug APK
 ./gradlew :app:assembleDebug
-
-# Deploy to your connected Pixel/Tensor device
 adb install -r app/build/outputs/apk/debug/app-debug.apk
-
 ```
 
-### 2\. Loading a Model for TPU Evaluation
+`sample_app_tpu.apk` in this folder is Google's original chat sample, not RemoteAI Responder.
 
-To evaluate high-performance models like Gemma 4 on the Tensor TPU:
+## Use
 
-#### Method A: Bundle via Assets (Static Integration)
+1. **Open the app.** On first launch it offers to download the model for your phone. Wi-Fi is recommended; the status line shows progress, speed and time left, and an interrupted download resumes where it stopped. If you skip it, the download stays available in the model menu.
+2. **Tap Start API.** The app asks for permission to show notifications (for the persistent notification and its Stop button) and to be exempt from battery optimization (so it keeps answering with the screen off).
+3. **Copy the base URL and API key** with the Copy buttons at the bottom of the screen.
+4. **Send requests** from another machine on the same network. Each request and reply appears in the **Traffic** log, with timing and any errors.
 
-1. Drop your `.litertlm` file into `app/src/main/assets/`.  
-2. Register the file in `ModelResolver.kt` by mapping it to a `ModelConfig` instance.  
-3. Recompile. The framework will automatically handle extraction to the internal app cache on first boot.
+To stop serving, tap **Stop API** or use **Stop API** in the notification. Stopping releases the model's memory. If the app is killed or updated while the API is on, the API starts again by itself.
 
-#### Method B: Sideloading (Rapid Prototyping)
+## API
 
-Alternatively, launch the app UI, select **Upload Custom Model** from the top dropdown, and load the `.litertlm` file directly from device storage.
+The app serves plain HTTP on port **8080**.
 
----
+| Endpoint | Auth | Description |
+|---|---|---|
+| `GET /health` | No | Liveness check and the loaded model ID |
+| `GET /v1/models` | Yes | The loaded model |
+| `POST /v1/messages` | Yes | Generate a reply ([Anthropic Messages API](https://docs.anthropic.com/en/api/messages) format) |
 
-## 🏗️ Reusing as a Framework: Key Integrations
+Authenticate with either `x-api-key: <key>` or `Authorization: Bearer <key>`. `POST /v1/messages` also requires an `anthropic-version` header.
 
-If you are adapting this codebase into an existing project, pay attention to these critical hardware configurations:
+```shell
+curl http://PHONE_IP:8080/v1/messages \
+  -H "x-api-key: $API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "phone",
+    "max_tokens": 200,
+    "system": "Answer in one sentence.",
+    "messages": [{"role": "user", "content": "What is a TPU?"}]
+  }'
+```
 
-### 1\. Native Library Linker Requirements (`build.gradle.kts`)
-
-LiteRT-LM communicates with the Tensor TPU(NPU) via a dynamic vendor library loader (`libLiteRtDispatch_GoogleTensor.so`). To prevent the Android asset packaging tool from compressing this native library (which prevents direct memory-mapping (`mmap`) by the linker), your `app/build.gradle.kts` must include:
-
-```kotlin
-android {
-    ...
-    packaging {
-        jniLibs {
-            // Crucial: Keeps vendor shared libraries uncompressed for direct linker mapping
-            useLegacyPackaging = true 
-        }
-    }
-    ndk {
-        abiFilters.add("arm64-v8a")
-    }
+```json
+{
+  "type": "message",
+  "role": "assistant",
+  "content": [{"type": "text", "text": "A TPU (Tensor Processing Unit) is ..."}],
+  "stop_reason": "end_turn",
+  "usage": {"input_tokens": 7, "output_tokens": 51}
 }
-
 ```
 
-### 2\. Initializing the NPU Backend
+Multi-turn conversations work: send earlier `user` and `assistant` turns in `messages`, ending with a `user` turn. `system` can be a string or a list of text blocks.
 
-When instantiating the LiteRT-LM engine, the framework passes the application's `nativeLibraryDir` to point the runtime toward the device's hardware-specific dispatch libraries:
+### Current limitations
 
-```kotlin
-val config = EngineConfig().apply {
-    if (preferredBackend == Backend.NPU) {
-        // Points LiteRT to the hardware-specific dispatch library path
-        setNativeLibraryDir(context.applicationInfo.nativeLibraryDir)
-    }
-}
+- **No streaming.** `"stream": true` is ignored and the full reply is returned at once, so clients that require streaming (including the Anthropic SDKs' streaming helpers) won't work yet.
+- **Text only.** Image and audio content blocks are rejected.
+- **Generation settings are ignored.** `max_tokens`, `temperature`, `top_p` and `stop_sequences` have no effect, and `model` can be any string.
+- **Estimated usage.** Token counts in `usage` are approximate (characters ÷ 4).
+- **One request at a time.** Requests are queued and served in order.
+- **Plain HTTP.** The API key and traffic are not encrypted. Use it only on a network you trust, and don't expose port 8080 to the internet.
+
+## How it works
 
 ```
+app/src/main/java/com/google/googletensortpu/googleTensorTPUApp/
+├── AnthropicServerService.kt  Foreground service: HTTP server, auth, request handling, status and traffic log
+├── LiteRTLMManager.kt         LiteRT-LM engine: NPU → GPU → CPU fallback, one request at a time
+├── ModelResolver.kt           Model list, choice of model for this phone, file locations
+├── ModelDownloader.kt         Resumable model downloads with progress and speed
+├── MainActivity.kt            Control panel: model picker, traffic log, connection details, start/stop
+└── LogAdapter.kt              Traffic log list
+```
 
----
+- **The service owns the model.** Only `AnthropicServerService` loads the model; the screen just shows status. Stopping the API closes connections, lets in-flight work finish, then releases the model.
+- **Staying up in the background.** The service runs as a foreground service with a persistent notification. It holds a Wi-Fi lock while serving and a wake lock for each request, and `START_STICKY` brings it back if Android kills the process.
+- **Models.** Downloaded models live in the app's private storage (`files/models/`). Deleting a model from the menu removes every copy the app holds.
 
-## 🧪 Verification & Testing
+### TPU notes
 
-The framework includes a unit testing suite targeting the non-UI business logic (`ModelResolver`, `ModelConfig`, engine configuration parsing).
+To run on the Tensor TPU, the app ships the Tensor dispatch library (`app/src/main/jniLibs/arm64-v8a/libLiteRtDispatch_GoogleTensor.so`), loads the vendor libraries `/vendor/lib64/libedgetpu_litert.so` and `libedgetpu_util.so` at service start, and passes the app's native library directory to the NPU backend. `useLegacyPackaging = true` in `app/build.gradle.kts` keeps the dispatch library uncompressed so it can be memory-mapped.
 
-Execute tests via Gradle:
+## Tests
 
 ```shell
 ./gradlew app:testDebugUnitTest
-
 ```
 
-> **Architecture Note:** The tests leverage **Robolectric** to mock the Android runtime environment and **Mockito** for component isolation, providing a template for how to unit-test local AI orchestration pipelines without requiring a physical device connection.
+The unit tests cover `ModelResolver`, `ModelConfig` and model selection, using Robolectric.
 
----
+## Credits and license
 
-## 📜 License
+RemoteAI Responder is built on Google's [LiteRT-LM Multimodal Chatbot: Google Tensor TPU Reference Implementation](https://github.com/google-ai-edge/litert-samples/tree/main/samples/litert/google/sample_app_tpu) from [google-ai-edge/litert-samples](https://github.com/google-ai-edge/litert-samples), and uses [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM). It is not affiliated with or endorsed by Google or Anthropic; "Anthropic-compatible" describes the request and response format only.
 
-This framework wrapper is open-source software licensed under the [Apache License 2.0](https://www.google.com/search?q=LICENSE).  
+Licensed under the [Apache License 2.0](../../../../LICENSE). This version modifies the original sample as described above.
