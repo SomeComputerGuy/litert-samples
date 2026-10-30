@@ -33,26 +33,29 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ## Use
 
 1. **Open the app.** On first launch it offers to download the model for your phone. Wi-Fi is recommended; the status line shows progress, speed and time left, and an interrupted download resumes where it stopped. If you skip it, the download stays available in the model menu.
-2. **Tap Start API.** The app asks for permission to show notifications (for the persistent notification and its Stop button) and to be exempt from battery optimization (so it keeps answering with the screen off).
-3. **Copy the base URL and API key** with the Copy buttons at the bottom of the screen.
-4. **Send requests** from another machine on the same network. Each request and reply appears in the **Traffic** log, with timing and any errors.
+2. **Tap Start API.** The app asks for permission to show notifications (for the persistent notification, its Stop button and pairing requests), to be exempt from battery optimization (so it keeps answering with the screen off), and on Android 14+ to show full-screen notifications (so pairing requests wake the phone while it's locked).
+3. **Pair a coordinator** from another machine on the same network with [`coordinator/remoteai.py`](#coordinator). The phone shows the request with a 6-digit code; check it matches and approve with your fingerprint or screen lock. Paired coordinators are listed under **Paired coordinators**, where you can remove them.
+4. **Send requests.** Each request and reply appears in the **Traffic** log, with timing and any errors.
+
+Instead of pairing, a client can use the **API key** shown in the app, over HTTPS. That skips the phone's approval, and the client has to trust the phone's self-signed certificate on its own (`curl -k` doesn't check it at all), so pairing is the safer choice.
 
 To stop serving, tap **Stop API** or use **Stop API** in the notification. Stopping releases the model's memory. If the app is killed or updated while the API is on, the API starts again by itself.
 
 ## API
 
-The app serves plain HTTP on port **8080**.
+The app serves **HTTPS only**, on port **2424** ("AIAI"), with TLS 1.2 or 1.3. There is no plain-HTTP port. While the API is on, the phone advertises itself on the local network over mDNS as `_remoteai._tcp`, named "RemoteAI on <phone model>", with TXT records `v`, `model` and `fp` (the certificate's SHA-256 fingerprint; advisory only, since anyone on the network can advertise).
 
 | Endpoint | Auth | Description |
 |---|---|---|
 | `GET /health` | No | Liveness check and the loaded model ID |
 | `GET /v1/models` | Yes | The loaded model |
 | `POST /v1/messages` | Yes | Generate a reply ([Anthropic Messages API](https://docs.anthropic.com/en/api/messages) format) |
+| `POST /v1/pair/start`, `/v1/pair/finish` | No | Pairing (see [Pairing protocol](#pairing-protocol)) |
 
-Authenticate with either `x-api-key: <key>` or `Authorization: Bearer <key>`. `POST /v1/messages` also requires an `anthropic-version` header.
+Authenticate with a paired coordinator's token or the app's API key, as either `x-api-key: <token>` or `Authorization: Bearer <token>`. `POST /v1/messages` also requires an `anthropic-version` header.
 
 ```shell
-curl http://PHONE_IP:8080/v1/messages \
+curl -k https://PHONE_IP:2424/v1/messages \
   -H "x-api-key: $API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "content-type: application/json" \
@@ -83,13 +86,39 @@ Multi-turn conversations work: send earlier `user` and `assistant` turns in `mes
 - **Generation settings are ignored.** `max_tokens`, `temperature`, `top_p` and `stop_sequences` have no effect, and `model` can be any string.
 - **Estimated usage.** Token counts in `usage` are approximate (characters ÷ 4).
 - **One request at a time.** Requests are queued and served in order.
-- **Plain HTTP.** The API key and traffic are not encrypted. Use it only on a network you trust, and don't expose port 8080 to the internet.
+- **Local network only.** Don't expose port 2424 to the internet.
+
+## Coordinator
+
+[`coordinator/remoteai.py`](coordinator/remoteai.py) finds phones, pairs with them and sends them requests. It needs Python 3.9+, plus `pip install zeroconf` for discovery.
+
+```shell
+python3 coordinator/remoteai.py discover          # phones on the network, and whether they're paired
+python3 coordinator/remoteai.py pair "Pixel 10"   # prints a code; approve it on the phone
+python3 coordinator/remoteai.py ask "Pixel 10" "What is a TPU?"
+python3 coordinator/remoteai.py proxy "Pixel 10"  # http://127.0.0.1:8787 for Anthropic SDKs
+```
+
+Pairings are saved in `~/.config/remoteai/devices.json` (owner-only; it holds tokens). Each request looks the phone up over mDNS by its certificate fingerprint, so a changed IP address doesn't matter, and refuses to send anything if the phone presents a different certificate than the one it paired with. If you remove a coordinator in the app, it's cut off at once. Its next `ask` says the phone removed it and asks "Request pairing again?"; only on yes does the phone get a new pairing request, which you still have to approve. Re-pairing refuses a phone whose certificate has changed. Without a terminal to ask on (scripts, `proxy`), it just reports that the pairing was removed.
+
+`proxy` serves a plain local endpoint on `127.0.0.1` only, so SDKs that expect a normal base URL work unchanged: use `base_url="http://127.0.0.1:8787"` and any API key.
+
+### Pairing protocol
+
+The phone's TLS key is an EC P-256 key generated in the Android Keystore; it never leaves the phone's secure hardware. Its self-signed certificate is pinned by the coordinator at pairing:
+
+1. The coordinator connects over TLS, accepting any certificate but recording its SHA-256 fingerprint `fp`. It sends `POST /v1/pair/start` with its name and `SHA-256(client_nonce)`, and gets back a pairing ID and `server_nonce`.
+2. It sends `POST /v1/pair/finish` with `client_nonce`. Both sides compute the code `SHA-256(fp ‖ client_nonce ‖ server_nonce)`, first 4 bytes, mod 1,000,000, each using the certificate it actually sees. An interceptor would present a different certificate, and because the coordinator committed to its nonce before seeing the server's, the interceptor can't choose values that make the codes match.
+3. The phone shows the code and asks for a fingerprint, face or screen lock. On approval, `finish` returns a random per-coordinator token; the phone stores only its hash. The request waits up to 2 minutes, then fails with 408; a denial returns 403.
 
 ## How it works
 
 ```
 app/src/main/java/io/github/somecomputerguy/remoteairesponder/
-├── AnthropicServerService.kt  Foreground service: HTTP server, auth, request handling, status and traffic log
+├── AnthropicServerService.kt  Foreground service: HTTPS server, mDNS, auth, request handling, status and traffic log
+├── ServerIdentity.kt          TLS key in the Android Keystore and its self-signed certificate
+├── Pairing.kt                 Pairing protocol, comparison code, paired coordinators and their tokens
+├── PairingActivity.kt         Pairing approval screen, with fingerprint or screen-lock check
 ├── LiteRTLMManager.kt         LiteRT-LM engine: NPU → GPU → CPU fallback, one request at a time
 ├── ModelResolver.kt           Model list, choice of model for this phone, file locations
 ├── ModelDownloader.kt         Resumable model downloads with progress and speed

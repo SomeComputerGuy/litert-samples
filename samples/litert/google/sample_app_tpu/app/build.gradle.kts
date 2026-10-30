@@ -71,6 +71,7 @@ dependencies {
   implementation(libs.litertlm.android)
   implementation(libs.litert)
   implementation(libs.androidx.activity.ktx) // Add this line
+  implementation(libs.androidx.biometric)
   implementation(libs.androidx.camera.core)
   implementation(libs.androidx.camera.camera2)
   implementation(libs.androidx.camera.lifecycle)

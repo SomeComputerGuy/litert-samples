@@ -2,6 +2,7 @@ package io.github.somecomputerguy.remoteairesponder
 
 import android.Manifest
 import android.app.AlertDialog
+import android.app.NotificationManager
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
@@ -78,6 +79,7 @@ class MainActivity : AppCompatActivity() {
 
     private var selectedModel: ModelConfig? = null
     private var downloadJob: Job? = null
+    private var lastShownPairingId: String? = null
 
     // Action waiting on the notification permission prompt.
     private var afterNotificationPermission: (() -> Unit)? = null
@@ -146,6 +148,18 @@ class MainActivity : AppCompatActivity() {
                 AnthropicServerService.status.collect { onServerStatus(it) }
             }
         }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // Android blocks the server from opening the prompt while the app is in the
+                // background, so open it from here whenever the app is on screen.
+                Pairing.pending.collect { request ->
+                    if (request != null && request.id != lastShownPairingId) {
+                        lastShownPairingId = request.id
+                        startActivity(Intent(this@MainActivity, PairingActivity::class.java))
+                    }
+                }
+            }
+        }
 
         if (!isServerActive() && AnthropicServerService.wasLeftOn(this)) {
             // The API was on when the process died (e.g. an app update), so bring it back.
@@ -173,6 +187,12 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         // The phone's address can change while the app is in the background.
         textBaseUrl.text = baseUrl()
+        // A coordinator may have paired while the app was in the background.
+        refreshPairedSummary()
+        // Back from the battery optimization screen: offer the lock-screen prompt next.
+        if (isServerActive() && uiPrefs.getBoolean("battery_exemption_asked", false)) {
+            requestLockScreenPromptsOnce()
+        }
     }
 
     private fun applyWindowInsets() {
@@ -525,7 +545,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun baseUrl(): String =
-        "http://${getPhoneIpAddress() ?: "PHONE_IP"}:${AnthropicServerService.PORT}"
+        "https://${getPhoneIpAddress() ?: "PHONE_IP"}:${AnthropicServerService.PORT}"
 
     private fun copyToClipboard(label: String, text: String, sensitive: Boolean) {
         val clip = ClipData.newPlainText(label, text)
@@ -542,6 +562,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun refreshPairedSummary() {
+        val clients = Pairing.clients(this)
+        val summary = when (clients.size) {
+            0 -> "None · coordinators find this phone on the network"
+            1 -> clients[0].name
+            else -> "${clients.size} coordinators"
+        }
+        findViewById<TextView>(R.id.textPaired).text =
+            if (androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+                summary
+            } else {
+                "$summary\nNotifications are off: pairing requests only appear while this app is open"
+            }
+    }
+
+    private fun showPairedClients() {
+        val clients = Pairing.clients(this)
+        val builder = AlertDialog.Builder(this).setTitle("Paired coordinators")
+        if (clients.isEmpty()) {
+            builder.setMessage(
+                "None yet. A coordinator on the same network finds this phone as " +
+                    "\"${AnthropicServerService.MDNS_SERVICE_TYPE}\" while the API is on, and pairing asks " +
+                    "you to approve it here with your fingerprint or screen lock."
+            )
+        } else {
+            val format = java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM)
+            builder.setItems(clients.map { "${it.name}\npaired ${format.format(java.util.Date(it.pairedAt))}" }
+                .toTypedArray()) { _, which ->
+                val client = clients[which]
+                AlertDialog.Builder(this)
+                    .setTitle("Remove ${client.name}?")
+                    .setMessage("It will no longer be able to use this phone until it pairs again.")
+                    .setPositiveButton("Remove") { _, _ ->
+                        Pairing.revoke(this, client.id)
+                        refreshPairedSummary()
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+        builder.setPositiveButton("Close", null).show()
+    }
+
     private fun setupConnectionPanel() {
         val token = getOrCreateApiToken()
         textApiKey.text = "${token.take(6)}…${token.takeLast(4)}"
@@ -554,6 +617,8 @@ class MainActivity : AppCompatActivity() {
             textBaseUrl.text = baseUrl()
             copyToClipboard("Base URL", baseUrl(), sensitive = false)
         }
+        findViewById<MaterialButton>(R.id.buttonManagePaired).setOnClickListener { showPairedClients() }
+        refreshPairedSummary()
 
         buttonApiServer.setOnClickListener {
             if (isServerActive()) {
@@ -596,7 +661,10 @@ class MainActivity : AppCompatActivity() {
         val power = getSystemService(PowerManager::class.java)
         if (power.isIgnoringBatteryOptimizations(packageName) ||
             uiPrefs.getBoolean("battery_exemption_asked", false)
-        ) return
+        ) {
+            requestLockScreenPromptsOnce()
+            return
+        }
         uiPrefs.edit().putBoolean("battery_exemption_asked", true).apply()
         try {
             startActivity(
@@ -606,6 +674,37 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.w(TAG, "Battery optimization request unavailable", e)
         }
+    }
+
+    /**
+     * Android 14+ only lets calling and alarm apps light up the lock screen unless the user
+     * allows it; without it, pairing requests arrive as an ordinary notification.
+     */
+    private fun requestLockScreenPromptsOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        if (getSystemService(NotificationManager::class.java).canUseFullScreenIntent() ||
+            uiPrefs.getBoolean("full_screen_prompts_asked", false)
+        ) return
+        uiPrefs.edit().putBoolean("full_screen_prompts_asked", true).apply()
+        AlertDialog.Builder(this)
+            .setTitle("Show pairing requests on the lock screen?")
+            .setMessage(
+                "When a coordinator asks to pair, the phone can wake up and show the request " +
+                    "even while locked. Otherwise it arrives as a normal notification.\n\n" +
+                    "Turn on \"Allow full-screen notifications\" on the next screen."
+            )
+            .setPositiveButton("Open settings") { _, _ ->
+                try {
+                    startActivity(
+                        Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT)
+                            .setData(Uri.parse("package:$packageName"))
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Full-screen notification settings unavailable", e)
+                }
+            }
+            .setNegativeButton("Not now", null)
+            .show()
     }
 
     private fun onServerStatus(status: AnthropicServerService.Status) {

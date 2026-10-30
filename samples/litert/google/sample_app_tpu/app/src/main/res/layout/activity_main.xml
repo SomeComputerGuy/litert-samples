@@ -176,7 +176,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:fontFamily="monospace"
-                    android:text="http://PHONE_IP:8080"
+                    android:text="https://PHONE_IP:2424"
                     android:textColor="#F3F4F6"
                     android:textSize="14sp" />
             </LinearLayout>
@@ -234,6 +234,50 @@
                 android:minWidth="0dp"
                 android:paddingHorizontal="14dp"
                 android:text="Copy"
+                android:textColor="#F3F4F6"
+                android:textSize="12sp"
+                app:strokeColor="#3F3F4A" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="PAIRED COORDINATORS"
+                    android:textColor="#9CA3AF"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.08" />
+
+                <TextView
+                    android:id="@+id/textPaired"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="None"
+                    android:textColor="#F3F4F6"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/buttonManagePaired"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:minWidth="0dp"
+                android:paddingHorizontal="14dp"
+                android:text="Manage"
                 android:textColor="#F3F4F6"
                 android:textSize="12sp"
                 app:strokeColor="#3F3F4A" />

@@ -12,6 +12,7 @@ litertlmAndroid = "0.12.0"
 litertlmAndroidVersion = "0.12.0"
 material = "1.13.0"
 camerax = "1.4.0"
+biometric = "1.1.0"
 
 
 [libraries]
@@ -24,6 +25,7 @@ litert = { module = "com.google.ai.edge.litert:litert", version.ref = "litert" }
 litertlm-android = { module = "com.google.ai.edge.litertlm:litertlm-android", version.ref = "litertlmAndroid" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
+androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
 androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
 androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }

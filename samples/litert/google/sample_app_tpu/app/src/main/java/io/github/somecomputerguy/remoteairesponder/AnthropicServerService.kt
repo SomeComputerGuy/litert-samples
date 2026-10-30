@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
@@ -35,8 +37,7 @@ import java.io.BufferedOutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.security.SecureRandom
-import java.util.Base64
+import javax.net.ssl.SSLException
 
 class AnthropicServerService : Service() {
 
@@ -67,10 +68,14 @@ class AnthropicServerService : Service() {
         const val KEY_MODEL_ID = "model_id"
         const val KEY_TOKEN = "api_token"
 
-        const val PORT = 8080
+        /** HTTPS only ("AIAI"). Pairing and the API share it. */
+        const val PORT = 2424
+        const val MDNS_SERVICE_TYPE = "_remoteai._tcp"
         private const val TAG = "AnthropicServer"
         private const val CHANNEL_ID = "anthropic_server"
         private const val NOTIFICATION_ID = 8102
+        private const val PAIRING_CHANNEL_ID = "pairing_requests"
+        private const val PAIRING_NOTIFICATION_ID = 8105
         private const val MAX_BODY_BYTES = 1024 * 1024
         private const val REQUEST_WAKE_LOCK_TIMEOUT_MS = 10 * 60 * 1000L
 
@@ -143,6 +148,7 @@ class AnthropicServerService : Service() {
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(serviceJob + Dispatchers.IO)
     private var serverSocket: ServerSocket? = null
+    private var mdnsRegistration: NsdManager.RegistrationListener? = null
     private var selectedModel: ModelConfig? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private val openClients = java.util.concurrent.ConcurrentHashMap.newKeySet<Socket>()
@@ -243,18 +249,20 @@ class AnthropicServerService : Service() {
         if (serverSocket != null) return@withContext
 
         // Set SO_REUSEADDR before binding so a quick stop/start can rebind the port.
-        val socket = ServerSocket()
+        val socket = ServerIdentity.createServerSocket()
         socket.reuseAddress = true
         socket.bind(InetSocketAddress(PORT))
         serverSocket = socket
         _status.value = Status.Running(model.name)
-        updateNotification("Running · ${model.name} · port $PORT")
+        updateNotification("Running · ${model.name} · port $PORT (TLS)")
         log(
             LogKind.INFO,
-            "Listening on port $PORT",
-            "${model.name} on ${LiteRTLMManager.getInstance(applicationContext).getActiveBackendName()}"
+            "Listening on port $PORT (TLS)",
+            "${model.name} on ${LiteRTLMManager.getInstance(applicationContext).getActiveBackendName()}\n" +
+                "Certificate SHA-256: ${ServerIdentity.fingerprint}"
         )
-        Log.i(TAG, "Anthropic-compatible API listening on port $PORT")
+        Log.i(TAG, "Anthropic-compatible API listening on port $PORT (TLS)")
+        registerMdns(model)
 
         while (!socket.isClosed) {
             val client = try {
@@ -329,8 +337,68 @@ class AnthropicServerService : Service() {
                 return
             }
 
+            fun readBody(): ByteArray? {
+                val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
+                if (contentLength <= 0 || contentLength > MAX_BODY_BYTES) {
+                    respond(413, errorJson("Invalid or oversized request body"))
+                    return null
+                }
+                val body = ByteArray(contentLength)
+                var offset = 0
+                while (offset < contentLength) {
+                    val count = input.read(body, offset, contentLength - offset)
+                    if (count < 0) break
+                    offset += count
+                }
+                if (offset != contentLength) {
+                    respond(400, errorJson("Incomplete request body"))
+                    return null
+                }
+                return body
+            }
+
+            if (method == "POST" && path.startsWith("/v1/pair/")) {
+                val body = JSONObject((readBody() ?: return).toString(Charsets.UTF_8))
+                when (path) {
+                    "/v1/pair/start" -> {
+                        val (id, serverNonce) = Pairing.start(
+                            body.optString("client_name"),
+                            body.getString("commitment")
+                        )
+                        log(LogKind.INFO, "Pairing started by $remote", body.optString("client_name"))
+                        respond(200, JSONObject()
+                            .put("pairing_id", id)
+                            .put("server_nonce", Pairing.toHex(serverNonce))
+                            .put("device_name", deviceName()))
+                    }
+                    "/v1/pair/finish" -> {
+                        val outcome = Pairing.finish(
+                            applicationContext,
+                            body.getString("pairing_id"),
+                            body.getString("client_nonce"),
+                            remote,
+                            ::showPairingPrompt
+                        )
+                        cancelPairingNotification()
+                        when (outcome) {
+                            is Pairing.Outcome.Approved -> {
+                                log(LogKind.INFO, "Paired with ${outcome.client.name}", "from $remote")
+                                respond(200, JSONObject()
+                                    .put("client_id", outcome.client.id)
+                                    .put("token", outcome.token)
+                                    .put("device_name", deviceName())
+                                    .put("fingerprint", ServerIdentity.fingerprint))
+                            }
+                            is Pairing.Outcome.Rejected -> respond(outcome.status, errorJson(outcome.message))
+                        }
+                    }
+                    else -> respond(404, errorJson("Endpoint not found"))
+                }
+                return
+            }
+
             if (!isAuthorized(headers)) {
-                respond(401, errorJson("Invalid or missing API key"))
+                respond(401, errorJson("Invalid or missing token or API key"))
                 return
             }
 
@@ -356,25 +424,7 @@ class AnthropicServerService : Service() {
                 return
             }
 
-            val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
-            if (contentLength <= 0 || contentLength > MAX_BODY_BYTES) {
-                respond(413, errorJson("Invalid or oversized request body"))
-                return
-            }
-
-            val body = ByteArray(contentLength)
-            var offset = 0
-            while (offset < contentLength) {
-                val count = input.read(body, offset, contentLength - offset)
-                if (count < 0) break
-                offset += count
-            }
-            if (offset != contentLength) {
-                respond(400, errorJson("Incomplete request body"))
-                return
-            }
-
-            val request = JSONObject(body.toString(Charsets.UTF_8))
+            val request = JSONObject((readBody() ?: return).toString(Charsets.UTF_8))
             val response = generateMessage(request, remote)
             respond(200, response)
             val answer = response.getJSONArray("content").getJSONObject(0).getString("text")
@@ -384,6 +434,9 @@ class AnthropicServerService : Service() {
                     .format((System.currentTimeMillis() - startedAt) / 1000.0),
                 answer
             )
+        } catch (e: SSLException) {
+            // Failed handshakes: port scans, or clients that don't speak TLS.
+            Log.d(TAG, "TLS handshake with $remote failed: ${e.message}")
         } catch (e: Exception) {
             Log.e(TAG, "Request failed", e)
             log(LogKind.ERROR, "$remote · $requestLabel → 500", e.message ?: e.javaClass.simpleName)
@@ -416,16 +469,17 @@ class AnthropicServerService : Service() {
         return ByteArray(bytes.size) { bytes[it] }
     }
 
+    /** A paired coordinator's token, or the API key shown in the app. */
     private fun isAuthorized(headers: Map<String, String>): Boolean {
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        val expected = prefs.getString(KEY_TOKEN, null) ?: return false
-
         val supplied = headers["x-api-key"]
             ?: headers["authorization"]?.removePrefix("Bearer ")?.takeIf {
                 headers["authorization"]?.startsWith("Bearer ", ignoreCase = true) == true
             }
+            ?: return false
 
-        return supplied != null && constantTimeEquals(expected, supplied)
+        if (Pairing.authenticate(applicationContext, supplied) != null) return true
+        val expected = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_TOKEN, null) ?: return false
+        return constantTimeEquals(expected, supplied)
     }
 
     private fun constantTimeEquals(a: String, b: String): Boolean {
@@ -556,7 +610,10 @@ class AnthropicServerService : Service() {
             200 -> "OK"
             400 -> "Bad Request"
             401 -> "Unauthorized"
+            403 -> "Forbidden"
             404 -> "Not Found"
+            408 -> "Request Timeout"
+            409 -> "Conflict"
             413 -> "Payload Too Large"
             431 -> "Request Header Fields Too Large"
             else -> "Internal Server Error"
@@ -584,11 +641,10 @@ class AnthropicServerService : Service() {
     private fun shutDown(finalStatus: Status) {
         _status.value = Status.Stopping
         updateNotification("Stopping…")
-        try {
-            serverSocket?.close()
-        } catch (_: Exception) {
-        }
+        unregisterMdns()
+        runCatching { serverSocket?.close() }
         serverSocket = null
+        Pairing.pending.value?.let { Pairing.decide(it.id, false) }
         // Closing sockets unblocks handlers stuck reading from idle connections.
         openClients.forEach { runCatching { it.close() } }
 
@@ -634,6 +690,9 @@ class AnthropicServerService : Service() {
             )
             getSystemService(NotificationManager::class.java)
                 .createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(PAIRING_CHANNEL_ID, "Pairing requests", NotificationManager.IMPORTANCE_HIGH)
+            )
         }
     }
 
@@ -664,12 +723,79 @@ class AnthropicServerService : Service() {
             .notify(NOTIFICATION_ID, buildNotification(message))
     }
 
+    // ---------------------------------------------------------------- mDNS
+
+    private fun deviceName(): String = "RemoteAI on ${Build.MODEL}"
+
+    /** Advertises the TLS port as `_remoteai._tcp` so coordinators can find the phone. */
+    private fun registerMdns(model: ModelConfig) {
+        val info = NsdServiceInfo().apply {
+            serviceName = deviceName()
+            serviceType = MDNS_SERVICE_TYPE
+            port = PORT
+            setAttribute("v", "1")
+            // Advisory only: coordinators trust the fingerprint they confirm while pairing.
+            setAttribute("fp", ServerIdentity.fingerprint)
+            setAttribute("model", model.id)
+        }
+        val listener = object : NsdManager.RegistrationListener {
+            override fun onServiceRegistered(info: NsdServiceInfo) {
+                log(LogKind.INFO, "Advertising on the network as \"${info.serviceName}\"", MDNS_SERVICE_TYPE)
+            }
+            override fun onRegistrationFailed(info: NsdServiceInfo, errorCode: Int) {
+                log(LogKind.ERROR, "Could not advertise on the network", "NSD error $errorCode")
+            }
+            override fun onServiceUnregistered(info: NsdServiceInfo) {}
+            override fun onUnregistrationFailed(info: NsdServiceInfo, errorCode: Int) {}
+        }
+        mdnsRegistration = listener
+        getSystemService(NsdManager::class.java)
+            .registerService(info, NsdManager.PROTOCOL_DNS_SD, listener)
+    }
+
+    private fun unregisterMdns() {
+        val listener = mdnsRegistration ?: return
+        mdnsRegistration = null
+        runCatching { getSystemService(NsdManager::class.java).unregisterService(listener) }
+    }
+
+    // ---------------------------------------------------------------- Pairing prompt
+
+    /**
+     * Shows [PairingActivity]. The full-screen intent opens it over the lock screen; when
+     * the phone is in use Android shows a heads-up notification instead.
+     */
+    private fun showPairingPrompt(request: Pairing.Request) {
+        log(LogKind.INFO, "Pairing request from ${request.clientName}", "${request.remote} · code ${request.code}")
+        val intent = Intent(this, PairingActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val pending = PendingIntent.getActivity(
+            this, 2, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notification = NotificationCompat.Builder(this, PAIRING_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setContentTitle("Pair with ${request.clientName}?")
+            .setContentText("Code ${request.code} · tap to review")
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pending)
+            .setFullScreenIntent(pending, true)
+            .setAutoCancel(true)
+            .setTimeoutAfter(Pairing.CODE_TIMEOUT_MS)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(PAIRING_NOTIFICATION_ID, notification)
+        // Opens straight away if the app is on screen; otherwise Android ignores it.
+        runCatching { startActivity(intent) }
+    }
+
+    private fun cancelPairingNotification() {
+        getSystemService(NotificationManager::class.java).cancel(PAIRING_NOTIFICATION_ID)
+    }
+
     override fun onDestroy() {
         // Normally shutDown() has already run; this covers the system stopping us directly.
-        try {
-            serverSocket?.close()
-        } catch (_: Exception) {
-        }
+        unregisterMdns()
+        runCatching { serverSocket?.close() }
         serverSocket = null
         serviceScope.cancel()
         releaseWifiLock()
